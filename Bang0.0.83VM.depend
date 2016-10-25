@@ -1,0 +1,7 @@
+# depslib dependency file v1.0
+1477352497 source:c:\users\nypro\desktop\code\codeblocks projects\bang0.0.83vm\main.cpp
+	<cstdio>
+	<iostream>
+	<chrono>
+	<ctime>
+
