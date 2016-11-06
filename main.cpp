@@ -7,7 +7,6 @@
 #include <vector>
 #include <memory>
 #include <map>
-#include <thread>
 //#include <fstream>
 
 using std::cout;
@@ -16,18 +15,16 @@ using std::string;
 //using std::ofstream;
 
 // STRUCTURES
-union Any;
-struct Func{
-    unsigned type;
-    std::unique_ptr<int> argTypes;
-    std::unique_ptr<Any> args;
-    std::unique_ptr<int> linkedFuncs;
+// PRIMITIVES
+union PrimitiveValue{
+    bool bl;
+    int64_t i64; uint64_t u64;
+    double f64;
 };
 
-struct Type{
+struct StackPrimitive{
     unsigned type;
-    std::unique_ptr<int> parentTypes;
-    std::unique_ptr<Any> mockCompObject;
+    PrimitiveValue value;
 };
 
 struct FuncObj{
@@ -40,38 +37,131 @@ struct TypeObj{
     unsigned dataType;
 };
 
+union Any;
+struct AnyPtr;
+union HashOpt;
+struct StrObj;
+
+struct AnyPtr{
+    unsigned type;
+    std::unique_ptr<Any> any;
+};
+
+// COMPLEX OBJ
+struct ComplexObj{
+    unsigned type;
+    unsigned size;
+    unsigned refCount;
+    std::unique_ptr<AnyPtr> anyPtr;
+};
+
+struct HashObj{
+	unsigned type;
+	unsigned size;
+	std::unique_ptr<StrObj> strKey;
+	std::unique_ptr<HashOpt> content;
+};
+
+union HashOpt{
+	 PrimitiveValue primVal;
+	 ComplexObj complexObj;
+	 HashObj hashObj;
+};
+
+struct MapObj{
+	unsigned type;
+	unsigned refCount;
+	unsigned dimens[2]; // dimen, dimenSizesLength
+	std::unique_ptr<unsigned> dimenSizes;
+	std::unique_ptr<HashObj> hashObj;
+};
+
+union BufferOpt{
+	std::unique_ptr<Any> any;
+	std::unique_ptr<BufferOpt> bufferOpt;
+};
+
+struct BufferObj{
+	unsigned type;
+	unsigned dimens[2]; // dimen, dimenSizesLength
+	std::unique_ptr<unsigned> dimenSizes;
+	BufferOpt content;
+};
+
+struct StrObj{
+	unsigned type; // + ascii_flag
+	unsigned size;
+	unsigned codePointSize;
+	std::unique_ptr<uint8_t> content;
+};
+
+struct CharsObj{
+	unsigned type; // + ascii_flag
+	unsigned size;
+	std::unique_ptr<uint32_t> content;
+};
+
 // ANY
 union Any{
-    int Int; unsigned UInt; int8_t I8; uint8_t U8;
-    int16_t I16; uint16_t U16; int32_t I32; uint32_t U32;
-    int64_t I64; uint64_t U64;
-    float F32; double F64;
-    FuncObj funcObj; TypeObj typeObj;
+    BufferObj bufferObj; MapObj mapObj;
+    StrObj strObj; CharsObj charsObj;
+    ComplexObj complexObj; FuncObj funcObj;
+    TypeObj typeObj; StackPrimitive stackPrim;
+    // smart pointers claimed the members are nontrivial,
+    // so these are needed. Pfft
+    Any(){};
+    ~Any(){};
 };
 
 
-// MAPS
-std::map<unsigned, Func*> funcMap;
-std::map<unsigned, Type*> typeMap;
+// STACK
+union Stack{ // IRRELEVANT
+   AnyPtr anyPtr;
+};
 
-void hello(){
-	cout << "OLLEH, DLROW" << endl;
-}
+// FUNCTION AND TYPE
+struct Func{
+    unsigned type; // Func
+    unsigned format;
+    unsigned instructions;
+//    std::unique_ptr<unsigned[]> callbackFuncs; // function index
+//    std::unique_ptr<unsigned[]> locals; // types
+//    std::pair<unsigned, unsigned> outersNeeded; // function index, outersOwned index
+//    std::unique_ptr<Any> outersOwned;
+//    std::unique_ptr<Any> constants;
+//    std::unique_ptr<Any> globals;
+//    unsigned backFuncsSize;
+//    unsigned localsSize;
+//    unsigned paramsSize;
+//    unsigned outersOwnedSize;
+//    unsigned constantsSize;
+//    unsigned globalsSize;
+//    unsigned instructionTop;
+//    unsigned instructionBottom;
+};
 
+struct Type{
+    unsigned type; // DataType
+    std::unique_ptr<unsigned> parentTypes; // all of them
+    std::unique_ptr<Any> mockObject;
+    std::unique_ptr<unsigned> constructors;
+    unsigned destructor;
+    std::unique_ptr<unsigned> parentTypesSize;
+    std::unique_ptr<unsigned> constructorsSize;
+};
 
-void vm();
+// LISTS
+std::unique_ptr<Func> funcList;
+std::unique_ptr<Type> typeList;
+
+void vm(unsigned stackSize);
 int main(){
 	cout << "\t\tHELLO THERE!" << endl;
-
-
 
 	std::chrono::time_point<std::chrono::system_clock> start, end;
 	start = std::chrono::system_clock::now();
 	//-----------------------BEGIN----------------------------------
-    cout << "size of : " << sizeof(FuncObj) << endl;
-    std::thread t1(hello);
-    t1.join();
-	vm();
+	vm(1000);
     //------------------------END-----------------------------------
 	std::chrono::duration<double> elapsed = end - start;
 	cout << "Time taken: " << elapsed.count() << "s" << endl;
@@ -79,446 +169,315 @@ int main(){
 	return 0;
 }
 
-void vm(){
+void vm(unsigned stackSize){
 
     // If you don't understand how the jump tables work.
-    // Please do not touch this code. I will have to hunt you down if you do.
-    // That's a promise.
+    // Please do not touch them.
+    // If you do, I will hunt you down.
+    // Consider that a promise.
 
+    // Stacks
+    //int
 
     // JUMP TABLES
-    void *primitiveTable[] = {
-        // MOV
-        &&INT_MOV, &&UINT_MOV, &&I8_MOV, &&U8_MOV,
-        &&I16_MOV, &&U16_MOV, &&I32_MOV, &&U32_MOV,
-        &&I64_MOV, &&U64_MOV, &&F32_MOV, &&F64_MOV,
+    void *primitiveOpTable[] = {
+        // MOV_V
+        &&BL_MOV_V, &&I64_MOV_V, &&U64_MOV_V, &&F64_MOV_V,
+        // MOV_R
+        &&BL_MOV_R, &&I64_MOV_R, &&U64_MOV_R, &&F64_MOV_R,
         // ADD
-        &&INT_ADD, &&UINT_ADD, &&I8_ADD, &&U8_ADD,
-        &&I16_ADD, &&U16_ADD, &&I32_ADD, &&U32_ADD,
-        &&I64_ADD, &&U64_ADD, &&F32_ADD, &&F64_ADD,
+        &&I64_ADD, &&U64_ADD, &&F64_ADD,
         // SUB
-        &&INT_SUB, &&UINT_SUB, &&I8_SUB, &&U8_SUB,
-        &&I16_SUB, &&U16_SUB, &&I32_SUB, &&U32_SUB,
-        &&I64_SUB, &&U64_SUB, &&F32_SUB, &&F64_SUB,
+        &&I64_SUB, &&U64_SUB, &&F64_SUB,
         // MUL
-        &&INT_MUL, &&UINT_MUL, &&I8_MUL, &&U8_MUL,
-        &&I16_MUL, &&U16_MUL, &&I32_MUL, &&U32_MUL,
-        &&I64_MUL, &&U64_MUL, &&F32_MUL, &&F64_MUL,
+        &&I64_MUL, &&U64_MUL, &&F64_MUL,
         // DIV
-        &&INT_DIV, &&UINT_DIV, &&I8_DIV, &&U8_DIV,
-        &&I16_DIV, &&U16_DIV, &&I32_DIV, &&U32_DIV,
-        &&I64_DIV, &&U64_DIV, &&F32_DIV, &&F64_DIV,
+        &&I64_DIV, &&U64_DIV, &&F64_DIV,
         // MOD
-        &&INT_MOD, &&UINT_MOD, &&I8_MOD, &&U8_MOD,
-        &&I16_MOD, &&U16_MOD, &&I32_MOD, &&U32_MOD,
-        &&I64_MOD, &&U64_MOD, &&F32_MOD, &&F64_MOD,
+        &&I64_MOD, &&U64_MOD, &&F64_MOD,
         // EXP
-        &&INT_EXP, &&UINT_EXP, &&I8_EXP, &&U8_EXP, 
-        &&I16_EXP, &&U16_EXP, &&I32_EXP, &&U32_EXP, 
-        &&I64_EXP, &&U64_EXP, &&F32_EXP, &&F64_EXP, 
+        &&I64_EXP, &&U64_EXP, &&F64_EXP,
+        // INCR
+        &&BL_INCR, &&I64_INCR, &&U64_INCR, &&F64_INCR,
+        // DECR
+        &&BL_DECR, &&I64_DECR, &&U64_DECR, &&F64_DECR,
+        // STEP
+        &&BL_STEP, &&I64_STEP, &&U64_STEP, &&F64_STEP,
         // RT
-        &&INT_RT, &&UINT_RT, &&I8_RT, &&U8_RT,
-        &&I16_RT, &&U16_RT, &&I32_RT, &&U32_RT,
-        &&I64_RT, &&U64_RT, &&F32_RT, &&F64_RT,
+        &&I64_ROOT, &&U64_ROOT, &&F64_ROOT,
         // UNM
-        &&INT_UNM, &&UINT_UNM, &&I8_UNM, &&U8_UNM,
-        &&I16_UNM, &&U16_UNM, &&I32_UNM, &&U32_UNM,
-        &&I64_UNM, &&U64_UNM, &&F32_UNM, &&F64_UNM,
+        &&I64_UNM, &&U64_UNM, &&F64_UNM,
         // EQ
-        &&INT_EQ, &&UINT_EQ, &&I8_EQ, &&U8_EQ,
-        &&I16_EQ, &&U16_EQ, &&I32_EQ, &&U32_EQ,
-        &&I64_EQ, &&U64_EQ, &&F32_EQ, &&F64_EQ,
+        &&BL_EQ, &&I64_EQ, &&U64_EQ, &&F64_EQ,
         // NEQ
-        &&INT_NEQ, &&UINT_NEQ, &&I8_NEQ, &&U8_NEQ,
-        &&I16_NEQ, &&U16_NEQ, &&I32_NEQ, &&U32_NEQ,
-        &&I64_NEQ, &&U64_NEQ, &&F32_NEQ, &&F64_NEQ,
+        &&BL_NEQ, &&I64_NEQ, &&U64_NEQ, &&F64_NEQ,
         // LT
-        &&INT_LT, &&UINT_LT, &&I8_LT, &&U8_LT,
-        &&I16_LT, &&U16_LT, &&I32_LT, &&U32_LT,
-        &&I64_LT, &&U64_LT, &&F32_LT, &&F64_LT,
+        &&BL_LT, &&I64_LT, &&U64_LT, &&F64_LT,
         // LE
-        &&INT_LE, &&UINT_LE, &&I8_LE, &&U8_LE,
-        &&I16_LE, &&U16_LE, &&I32_LE, &&U32_LE,
-        &&I64_LE, &&U64_LE, &&F32_LE, &&F64_LE,
+        &&BL_LE, &&I64_LE, &&U64_LE, &&F64_LE,
         // GT
-        &&INT_GT, &&UINT_GT, &&I8_GT, &&U8_GT,
-        &&I16_GT, &&U16_GT, &&I32_GT, &&U32_GT,
-        &&I64_GT, &&U64_GT, &&F32_GT, &&F64_GT,
+        &&BL_GT, &&I64_GT, &&U64_GT, &&F64_GT,
         // GE
-        &&INT_GE, &&UINT_GE, &&I8_GE, &&U8_GE,
-        &&I16_GE, &&U16_GE, &&I32_GE, &&U32_GE,
-        &&I64_GE, &&U64_GE, &&F32_GE, &&F64_GE,
+        &&BL_GE, &&I64_GE, &&U64_GE, &&F64_GE,
+        // AND
+        &&BL_AND,
+        // OR
+        &&BL_OR,
         // BNOT
-        &&INT_BNOT, &&UINT_BNOT, &&I8_BNOT, &&U8_BNOT,
-        &&I16_BNOT, &&U16_BNOT, &&I32_BNOT, &&U32_BNOT,
-        &&I64_BNOT, &&U64_BNOT, &&F32_BNOT, &&F64_BNOT,
+        &&I64_BNOT, &&U64_BNOT,
         // BOR
-        &&INT_BOR, &&UINT_BOR, &&I8_BOR, &&U8_BOR,
-        &&I16_BOR, &&U16_BOR, &&I32_BOR, &&U32_BOR,
-        &&I64_BOR, &&U64_BOR, &&F32_BOR, &&F64_BOR,
+        &&I64_BOR, &&U64_BOR,
         // BAND
-        &&INT_BAND, &&UINT_BAND, &&I8_BAND, &&U8_BAND,
-        &&I16_BAND, &&U16_BAND, &&I32_BAND, &&U32_BAND,
-        &&I64_BAND, &&U64_BAND, &&F32_BAND, &&F64_BAND,
+        &&I64_BAND, &&U64_BAND,
         // BXOR
-        &&INT_BXOR, &&UINT_BXOR, &&I8_BXOR, &&U8_BXOR,
-        &&I16_BXOR, &&U16_BXOR, &&I32_BXOR, &&U32_BXOR,
-        &&I64_BXOR, &&U64_BXOR, &&F32_BXOR, &&F64_BXOR,
+        &&I64_BXOR, &&U64_BXOR,
         // SHL
-        &&INT_SHL, &&UINT_SHL, &&I8_SHL, &&U8_SHL,
-        &&I16_SHL, &&U16_SHL, &&I32_SHL, &&U32_SHL,
         &&I64_SHL, &&U64_SHL,
         // SHR
-        &&INT_SHR, &&UINT_SHR, &&I8_SHR, &&U8_SHR,
-        &&I16_SHR, &&U16_SHR, &&I32_SHR, &&U32_SHR,
         &&I64_SHR, &&U64_SHR,
         // CASTS
+        &&BL_I64_CAST, &&BL_U64_CAST, &&BL_F64_CAST,
+        &&I64_BL_CAST, &&I64_U64_CAST, &&I64_F64_CAST,
+        &&U64_BL_CAST, &&U64_I64_CAST, &&U64_F64_CAST,
+        &&F64_BL_CAST, &&F64_I64_CAST, &&F64_U64_CAST,
     };
 
     void *instructionTable[] = {
-        &&MOV, &&P_MOV,
-        &&ADD, &&SUB, &&MUL, &&DIV, &&MOD, &&EXP, &&RT, &&UNM, &&P_ADD, &&P_SUB, &&P_MUL, &&P_DIV, &&P_MOD, &&P_EXP, &&P_RT, &&P_UNM,
-        &&EQ, &&NEQ, &&LT, &&LE, &&GT, &&GE, &&P_EQ, &&P_NEQ, &&P_LT, &&P_LE, &&P_GT, &&P_GE,
-        &&CAST, &&P_CAST,
-        &&BNOT, &&BOR, &&BAND, &&BXOR, &&P_BNOT, &&P_BOR, &&P_BAND, &&P_BXOR,
-        &&SHL, &&SHR, &&P_SHL, &&P_SHR,
-        &&JMP, &&INDEX, &&CALL, &&RET
+        &&MOV_V, &&MOV_R, &&P_MOV_V, &&P_MOV_R, &&N_MOV_V, &&N_MOV_R,
+        &&ADD, &&SUB, &&MUL, &&DIV, &&MOD, &&EXP, &&ROOT, &&UNM,
+        &&INCR, &&DECR, &&STEP,
+        &&CAST,
+        &&EQ_, &&NEQ_, &&LT_, &&LE_, &&GT_, &&GE_,
+        &&TRUE_, &&FALSE_,
+        &&AND, &&NOT,
+        &&BNOT, &&BOR, &&BAND, &&BXOR,
+        &&SHL, &&SHR,
+        &&JMP_, &&JMPBACK_,
+        &&CALL, &&CALL_, &&N_CALL,
+        &&STEPBACK, &&STEPBACK_,
+        &&DISPATCH, &&DISPATCH_, &&N_DISPATCH, &&N_DISPATCH_,
+        &&TMATCH1, &&TMATCH2, &&TMATCH3, &&TMATCH_,
+        &&TRY_, &&CATCH_,
+        &&THROW, &&RETHROW,
+        &&TCHECK_,
+        &&FROMMAP_, &&FROMBUF_, &&FROMSTR_, &&FROMCHARS_, &&FROMCOMP_,
+        &&IGETKEY, &&IGETKEY_, &&SGETKEY, &&SGETKEY_, &&N_GETKEY, &&NGETKEY_,
+        &&UPDATE,
+        &&PRINT, &&SCAN,
+        &&OPENFILE, &&READFILE, &&WRITEFILE, &&CLOSEFILE,
+        &&RET_V, &&RET_R,
+        &&CLEAR,
+        &&EXIT,
     };
 
-    // INSTRUCTION JUMP ACTIONS
+    // INSTRUCTION JUMP ACTIONS // _ instructions
     {
-        // 46 instructions
-        MOV:{}
-        P_MOV:{}
+        MOV_V:{}
+        MOV_R:{}
+        P_MOV_V:{}
+        P_MOV_R:{}
+        N_MOV_V:{}
+        N_MOV_R:{}
         ADD:{}
         SUB:{}
         MUL:{}
         DIV:{}
         MOD:{}
         EXP:{}
-        RT:{}
+        ROOT:{}
         UNM:{}
-        P_ADD:{}
-        P_SUB:{}
-        P_MUL:{}
-        P_DIV:{}
-        P_MOD:{}
-        P_EXP:{}
-        P_RT:{}
-        P_UNM:{}
-        EQ:{}
-        NEQ:{}
-        LT:{}
-        LE:{}
-        GT:{}
-        GE:{}
-        P_EQ:{}
-        P_NEQ:{}
-        P_LT:{}
-        P_LE:{}
-        P_GT:{}
-        P_GE:{}
+        INCR:{}
+        DECR:{}
+        STEP:{}
         CAST:{}
-        P_CAST:{}
+        EQ_:{}
+        NEQ_:{}
+        LT_:{}
+        LE_:{}
+        GT_:{}
+        GE_:{}
+        TRUE_:{}
+        FALSE_:{}
+        AND:{}
+        NOT:{}
         BNOT:{}
         BOR:{}
         BAND:{}
         BXOR:{}
-        P_BNOT:{}
-        P_BOR:{}
-        P_BAND:{}
-        P_BXOR:{}
         SHL:{}
         SHR:{}
-        P_SHL:{}
-        P_SHR:{}
-        JMP:{}
-        INDEX:{}
+        JMP_:{}
+        JMPBACK_:{}
         CALL:{}
-        RET:{}
+        CALL_:{}
+        N_CALL:{}
+        STEPBACK:{}
+        STEPBACK_:{}
+        DISPATCH:{}
+        DISPATCH_:{}
+        N_DISPATCH:{}
+        N_DISPATCH_:{}
+        TMATCH1:{}
+        TMATCH2:{}
+        TMATCH3:{}
+        TMATCH_:{}
+        TRY_:{}
+        CATCH_:{}
+        THROW:{}
+        RETHROW:{}
+        TCHECK_:{}
+		FROMMAP_:{}
+		FROMBUF_:{}
+		FROMSTR_:{}
+		FROMCHARS_:{}
+		FROMCOMP_:{}
+		IGETKEY:{}
+		IGETKEY_:{}
+		SGETKEY:{}
+		SGETKEY_:{}
+		N_GETKEY:{}
+		NGETKEY_:{}
+		UPDATE:{}
+		PRINT:{}
+		SCAN:{}
+		OPENFILE:{}
+		READFILE:{}
+		WRITEFILE:{}
+		CLOSEFILE:{}
+		RET_V:{}
+		RET_R:{}
+		CLEAR:{}
+		EXIT:{}
     }
 
 
-    // PRIMITIVE JUMP ACTIONS
+    // PRIMITIVE OP JUMP ACTIONS
     {
-        // MOV
-        INT_MOV:{}
-        UINT_MOV:{}
-        I8_MOV:{}
-        U8_MOV:{}
-        I16_MOV:{}
-        U16_MOV:{}
-        I32_MOV:{}
-        U32_MOV:{}
-        I64_MOV:{}
-        U64_MOV:{}
-        F32_MOV:{}
-        F64_MOV:{}
+        // MOV_V
+        BL_MOV_V:{}
+        I64_MOV_V:{}
+        U64_MOV_V:{}
+        F64_MOV_V:{}
+        // MOV_R
+        BL_MOV_R:{}
+        I64_MOV_R:{}
+        U64_MOV_R:{}
+        F64_MOV_R:{}
         // ADD
-        INT_ADD:{}
-        UINT_ADD:{}
-        I8_ADD:{}
-        U8_ADD:{}
-        I16_ADD:{}
-        U16_ADD:{}
-        I32_ADD:{}
-        U32_ADD:{}
         I64_ADD:{}
         U64_ADD:{}
-        F32_ADD:{}
         F64_ADD:{}
         // SUB
-        INT_SUB:{}
-        UINT_SUB:{}
-        I8_SUB:{}
-        U8_SUB:{}
-        I16_SUB:{}
-        U16_SUB:{}
-        I32_SUB:{}
-        U32_SUB:{}
         I64_SUB:{}
         U64_SUB:{}
-        F32_SUB:{}
         F64_SUB:{}
         // MUL
-        INT_MUL:{}
-        UINT_MUL:{}
-        I8_MUL:{}
-        U8_MUL:{}
-        I16_MUL:{}
-        U16_MUL:{}
-        I32_MUL:{}
-        U32_MUL:{}
         I64_MUL:{}
         U64_MUL:{}
-        F32_MUL:{}
         F64_MUL:{}
         // DIV
-        INT_DIV:{}
-        UINT_DIV:{}
-        I8_DIV:{}
-        U8_DIV:{}
-        I16_DIV:{}
-        U16_DIV:{}
-        I32_DIV:{}
-        U32_DIV:{}
         I64_DIV:{}
         U64_DIV:{}
-        F32_DIV:{}
         F64_DIV:{}
         // MOD
-        INT_MOD:{}
-        UINT_MOD:{}
-        I8_MOD:{}
-        U8_MOD:{}
-        I16_MOD:{}
-        U16_MOD:{}
-        I32_MOD:{}
-        U32_MOD:{}
         I64_MOD:{}
         U64_MOD:{}
-        F32_MOD:{}
         F64_MOD:{}
         // EXP
-        INT_EXP:{}
-        UINT_EXP:{}
-        I8_EXP:{}
-        U8_EXP:{}
-        I16_EXP:{}
-        U16_EXP:{}
-        I32_EXP:{}
-        U32_EXP:{}
         I64_EXP:{}
         U64_EXP:{}
-        F32_EXP:{}
         F64_EXP:{}
+        // INCR
+        BL_INCR:{}
+        I64_INCR:{}
+        U64_INCR:{}
+        F64_INCR:{}
+        // DECR
+        BL_DECR:{}
+        I64_DECR:{}
+        U64_DECR:{}
+        F64_DECR:{}
+        // STEP
+        BL_STEP:{}
+        I64_STEP:{}
+        U64_STEP:{}
+        F64_STEP:{}
         // RT
-        INT_RT:{}
-        UINT_RT:{}
-        I8_RT:{}
-        U8_RT:{}
-        I16_RT:{}
-        U16_RT:{}
-        I32_RT:{}
-        U32_RT:{}
-        I64_RT:{}
-        U64_RT:{}
-        F32_RT:{}
-        F64_RT:{}
-        // RT
-        INT_UNM:{}
-        UINT_UNM:{}
-        I8_UNM:{}
-        U8_UNM:{}
-        I16_UNM:{}
-        U16_UNM:{}
-        I32_UNM:{}
-        U32_UNM:{}
+        I64_ROOT:{}
+        U64_ROOT:{}
+        F64_ROOT:{}
+        // UNM
         I64_UNM:{}
         U64_UNM:{}
-        F32_UNM:{}
         F64_UNM:{}
         // EQ
-        INT_EQ:{}
-        UINT_EQ:{}
-        I8_EQ:{}
-        U8_EQ:{}
-        I16_EQ:{}
-        U16_EQ:{}
-        I32_EQ:{}
-        U32_EQ:{}
+        BL_EQ:{}
         I64_EQ:{}
         U64_EQ:{}
-        F32_EQ:{}
         F64_EQ:{}
         // NEQ
-        INT_NEQ:{}
-        UINT_NEQ:{}
-        I8_NEQ:{}
-        U8_NEQ:{}
-        I16_NEQ:{}
-        U16_NEQ:{}
-        I32_NEQ:{}
-        U32_NEQ:{}
+        BL_NEQ:{}
         I64_NEQ:{}
         U64_NEQ:{}
-        F32_NEQ:{}
         F64_NEQ:{}
         // LT
-        INT_LT:{}
-        UINT_LT:{}
-        I8_LT:{}
-        U8_LT:{}
-        I16_LT:{}
-        U16_LT:{}
-        I32_LT:{}
-        U32_LT:{}
+        BL_LT:{}
         I64_LT:{}
         U64_LT:{}
-        F32_LT:{}
         F64_LT:{}
         // LE
-        INT_LE:{}
-        UINT_LE:{}
-        I8_LE:{}
-        U8_LE:{}
-        I16_LE:{}
-        U16_LE:{}
-        I32_LE:{}
-        U32_LE:{}
+        BL_LE:{}
         I64_LE:{}
         U64_LE:{}
-        F32_LE:{}
         F64_LE:{}
         // GT
-        INT_GT:{}
-        UINT_GT:{}
-        I8_GT:{}
-        U8_GT:{}
-        I16_GT:{}
-        U16_GT:{}
-        I32_GT:{}
-        U32_GT:{}
+        BL_GT:{}
         I64_GT:{}
         U64_GT:{}
-        F32_GT:{}
         F64_GT:{}
         // GE
-        INT_GE:{}
-        UINT_GE:{}
-        I8_GE:{}
-        U8_GE:{}
-        I16_GE:{}
-        U16_GE:{}
-        I32_GE:{}
-        U32_GE:{}
+        BL_GE:{}
         I64_GE:{}
         U64_GE:{}
-        F32_GE:{}
         F64_GE:{}
+        // AND
+        BL_AND:{}
+        // OR
+        BL_OR:{}
         // BNOT
-        INT_BNOT:{}
-        UINT_BNOT:{}
-        I8_BNOT:{}
-        U8_BNOT:{}
-        I16_BNOT:{}
-        U16_BNOT:{}
-        I32_BNOT:{}
-        U32_BNOT:{}
         I64_BNOT:{}
         U64_BNOT:{}
-        F32_BNOT:{}
-        F64_BNOT:{}
         // BOR
-        INT_BOR:{}
-        UINT_BOR:{}
-        I8_BOR:{}
-        U8_BOR:{}
-        I16_BOR:{}
-        U16_BOR:{}
-        I32_BOR:{}
-        U32_BOR:{}
         I64_BOR:{}
         U64_BOR:{}
-        F32_BOR:{}
-        F64_BOR:{}
         // BAND
-        INT_BAND:{}
-        UINT_BAND:{}
-        I8_BAND:{}
-        U8_BAND:{}
-        I16_BAND:{}
-        U16_BAND:{}
-        I32_BAND:{}
-        U32_BAND:{}
         I64_BAND:{}
         U64_BAND:{}
-        F32_BAND:{}
-        F64_BAND:{}
         // BXOR
-        INT_BXOR:{}
-        UINT_BXOR:{}
-        I8_BXOR:{}
-        U8_BXOR:{}
-        I16_BXOR:{}
-        U16_BXOR:{}
-        I32_BXOR:{}
-        U32_BXOR:{}
         I64_BXOR:{}
         U64_BXOR:{}
-        F32_BXOR:{}
-        F64_BXOR:{}
         // SHL
-        INT_SHL:{}
-        UINT_SHL:{}
-        I8_SHL:{}
-        U8_SHL:{}
-        I16_SHL:{}
-        U16_SHL:{}
-        I32_SHL:{}
-        U32_SHL:{}
         I64_SHL:{}
         U64_SHL:{}
         // SHR
-        INT_SHR:{}
-        UINT_SHR:{}
-        I8_SHR:{}
-        U8_SHR:{}
-        I16_SHR:{}
-        U16_SHR:{}
-        I32_SHR:{}
-        U32_SHR:{}
         I64_SHR:{}
         U64_SHR:{}
+        // CASTS
+        BL_I64_CAST:{}
+        BL_U64_CAST:{}
+        BL_F64_CAST:{}
+        I64_BL_CAST:{}
+        I64_U64_CAST:{}
+        I64_F64_CAST:{}
+        U64_BL_CAST:{}
+        U64_I64_CAST:{}
+        U64_F64_CAST:{}
+        F64_BL_CAST:{}
+        F64_I64_CAST:{}
+        F64_U64_CAST:{}
     }
+
 }
-
-
-
-
-
-
-
 
 
 
