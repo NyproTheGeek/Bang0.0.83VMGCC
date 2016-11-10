@@ -1,11 +1,15 @@
 # depslib dependency file v1.0
-1478209702 source:c:\users\nypro\desktop\code\codeblocks projects\bang0.0.83vm\main.cpp
+1478660827 source:c:\users\nypro\desktop\code\codeblocks projects\bang0.0.83vm\main.cpp
+	<string>
+	<cctype>
+	<algorithm>
 	<iostream>
 	<cstdint>
 	<chrono>
 	<vector>
 	<memory>
 	<map>
+	<fstream>
 
 1477323399 source:c:\users\nypro\desktop\code\codeblocks projects\bang0.0.83vm\bobject.cpp
 	"bobject.h"
