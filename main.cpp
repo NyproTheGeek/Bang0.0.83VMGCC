@@ -10,6 +10,9 @@
 #include <memory>
 #include <map>
 #include <fstream>
+#if defined(_WIN32)
+#include <windows.h>
+#endif // defined
 
 using std::cout;
 using std::endl;
@@ -30,8 +33,8 @@ using std::ifstream;
  * @bug None that I know of. :-)
  */
 
-/* TODOs
- * I might remove all refCount fields if I see that I can rely 
+/*!
+ * @todo might remove all refCount fields if I see that I can rely
  * on shared_ptr internal refCount.
  */
 
@@ -40,7 +43,7 @@ using std::ifstream;
 // PRIMITIVES
 /*!
  * This union contains all possible 'bare' primitive values
- * supported by Bang.
+ * supported by Astro.
  */
 union PrimitiveValue{
     bool bl;
@@ -56,41 +59,51 @@ struct StackPrimitive{
     PrimitiveValue value;
 };
 
-/* REMOVE */
-/*!
- * This struct represents a function object.
- * Bang's functions are first class functions. They can be
- * passed around as variables.
- */
-struct FuncObj{
-    unsigned type;
-    unsigned func;
-};
-
-/*!
- * This struct represents a datatype object.
- * Bang's datatypes are first class structures. They can be
- * passed around as variables.
- */
-struct TypeObj{
-    unsigned type;
-    unsigned dataType;
-};
-/* END REMOVE */
-
 union Any;
 struct AnyPtr;
-union HashOpt;
-union BufferOpt;
+union IndiePtr;
+struct HashObj;
+struct BufferObj;
 struct StrObj;
+struct CharsObj;
+struct FuncObj;
+struct TypeObj;
+struct ComplexObj;
+struct Func;
+struct Type;
+
 /*!
- * This struct holds a pointer to any structures contained
- * within Any.
+ * This struct contains a pointer to any object that can be
+ * classified as Any. It also holds the type of the object
+ * pointed to.
  */
 struct AnyPtr{
     unsigned type;
     std::unique_ptr<Any> any;
 };
+
+/*!
+ * This union contains pointers to objects and bare primitives.
+ * Array objects are not included because they will be the ones
+ * to own this union.
+ */
+union IndiePtr{
+	std::unique_ptr<StrObj> strObj; std::unique_ptr<CharsObj> charsObj;
+	std::unique_ptr<FuncObj> funcObj; std::unique_ptr<TypeObj> typeObj;
+	std::unique_ptr<ComplexObj> complexObj;
+	std::unique_ptr<bool> bl;
+	std::unique_ptr<int64_t> i64;
+	std::unique_ptr<uint64_t> u64;
+	std::unique_ptr<double> f64;
+};
+
+union StackObj{
+	StackPrimitive prim;
+	AnyPtr any;
+	StackObj(){};
+    ~StackObj(){};
+};
+
 
 // COMPLEX OBJ
 /*!
@@ -100,7 +113,12 @@ struct ComplexObj{
     unsigned type;
     unsigned size;
     unsigned refCount;
-    std::unique_ptr<AnyPtr> anyPtr; // An array of AnyPtrs
+    std::unique_ptr<StackObj> obj; // An array StackObjs
+};
+
+union HashOpt{
+	IndiePtr indiePtr; // A array of an indie object
+	std::unique_ptr<HashObj> hashObj; // An array of HashObjs
 };
 
 /*!
@@ -112,14 +130,9 @@ struct HashObj{
 	unsigned type;
 	unsigned size;
 	std::unique_ptr<StrObj> strKey;
-	std::unique_ptr<HashOpt> content; // An Array of HashOpts
+	HashOpt content; // An array of HashOpts
 };
 
-union HashOpt{
-	PrimitiveValue primVal;
-	ComplexObj complexObj;
-	HashObj hashObj;
-};
 
 /*!
  * This struct represents a list object.
@@ -131,9 +144,13 @@ struct ListObj{
 	unsigned refCount;
 	unsigned dimen; // dimen (e.g. 3D)
 	std::unique_ptr<unsigned> dimenSizes; // e.g. 2x4x3
-	std::unique_ptr<HashObj> hashObj; // An Array of HashObjs
+	std::unique_ptr<HashObj> hashObj; // An array of HashObjs
 };
 
+union BufferOpt{
+	IndiePtr indiePtr; // A array of an indie object
+	std::unique_ptr<BufferObj> bufferObj; // An array of BufferObjs
+};
 
 /*!
  * This struct represents a buffer object.
@@ -148,24 +165,18 @@ struct BufferObj{
 	unsigned type;
 	unsigned dimen; // dimen (e.g. 3D)
 	std::unique_ptr<unsigned> dimenSizes; // e.g. 2x4x3
-	std::unique_ptr<BufferOpt> content;
+	BufferOpt content;
 };
-
-union BufferOpt{
-	std::unique_ptr<Any> any; // An Array of Anys
-	std::unique_ptr<BufferObj> bufferObj; // An array of BufferObjs
-};
-
 
 /*!
  * This struct represents a tuple object.
+ * A tuple object is 1-dimensional.
  */
 struct TupleObj{
 	unsigned type;
+	unsigned size;
 	unsigned refCount;
-	unsigned dimen; // dimen (e.g. 3D)
-	std::unique_ptr<unsigned> dimenSizes; // e.g. 2x4x3
-	BufferOpt content;
+	IndiePtr indiePtr; // A array of an indie object
 };
 
 /*!
@@ -200,6 +211,28 @@ struct CharsObj{
 	std::unique_ptr<uint32_t> content;
 };
 
+/*!
+ * This struct represents a function object.
+ * Bang's functions are first class functions. They can be
+ * passed around as variables.
+ */
+struct FuncObj{
+    unsigned type;
+    std::shared_ptr<Func> func;
+    std::unique_ptr<FuncObj> cofunctions;
+    unsigned cofunctionsSize;
+};
+
+/*!
+ * This struct represents a datatype object.
+ * Bang's datatypes are first class structures. They can be
+ * passed around as variables.
+ */
+struct TypeObj{
+    unsigned type;
+    std::shared_ptr<Func> dataType;
+};
+
 // FUNCTION AND TYPE
 /*!
  * This struct represents the function content.
@@ -208,7 +241,7 @@ struct CharsObj{
  * to.
  */
 struct Func{
-    unsigned type; // Func
+    unsigned type; // = Func
     unsigned format;
     unsigned instructions;
 };
@@ -222,13 +255,13 @@ struct Func{
  */
 struct Type{
     unsigned type; // = DataType
-    std::unique_ptr<unsigned> parentTypes; // all of them
-    std::unique_ptr<Any> mockObject;
+    ComplexObj mockObject;
+    std::unique_ptr<unsigned> ancestorTypes; // all of them
     std::unique_ptr<unsigned> constructors;
     unsigned normalDestructor;
     unsigned exceptionDestructor;
-    std::unique_ptr<unsigned> parentTypesSize;
-    std::unique_ptr<unsigned> constructorsSize;
+    unsigned ancestorTypesSize;
+    unsigned constructorsSize;
 };
 
 // ANY
@@ -237,14 +270,12 @@ struct Type{
  */
 union Any{
     BufferObj bufferObj; ListObj listObj; TupleObj tupleObj;
-    StrObj strObj; CharsObj charsObj; 
-    ComplexObj complexObj; 
-    Func func; Type type;
-    StackPrimitive stackPrim;
+    StrObj strObj; CharsObj charsObj;
+    ComplexObj complexObj;
+    FuncObj funcObj; TypeObj typeObj;
     Any(){};
     ~Any(){};
 };
-
 
 // INSTRUCTION
 /*!
@@ -289,19 +320,20 @@ struct ThreeAddyInstr{
  * This union contains all types of opcodes and attribute.
  */
 union Instr{
-	NoAddyInstr addy0;
-	OneAddyInstr addy1;
-	TwoAddyInstr addy2;
-	ThreeAddyInstr addy3;
+	NoAddyInstr addy0Instr;
+	OneAddyInstr addy1Instr;
+	TwoAddyInstr addy2Instr;
+	ThreeAddyInstr addy3Instr;
 	uint32_t attribute;
 };
 
 // LISTS
 std::unique_ptr<Func> funcList;
 std::unique_ptr<Type> typeList;
-std::unique_ptr<Any> formatList;
-std::unique_ptr<Any> globalList;
+std::unique_ptr<StackObj> formatList;
+std::unique_ptr<StackObj> globalList;
 
+void sizes();
 void vm(unsigned stackSize);
 void useCommandlineArgs(int argc, char *argv[]);
 void useConsoleArgs();
@@ -312,13 +344,16 @@ int main(int argc, char *argv[]){
 	std::chrono::time_point<std::chrono::system_clock> start, end;
 	start = std::chrono::system_clock::now();
 	//-----------------------BEGIN----------------------------------
+	/*SIZES*/
+	sizes();
+	/*SIZES*/
 	if(argc > 1) useCommandlineArgs(argc, argv);
 	else useConsoleArgs();
 	vm(1000);
     //------------------------END-----------------------------------
     end = std::chrono::system_clock::now();
 	std::chrono::duration<double> elapsed = end - start;
-	cout << "Time taken: " << elapsed.count() << "s" << endl;
+	cout << "> execution time: " << elapsed.count() << "s" << endl;
 
 	return 0;
 }
@@ -334,7 +369,7 @@ void vm(unsigned stackSize){
      */
 
     // STACK
-    
+
 
     // JUMP TABLES
     void *primitiveOpTable[] = {
@@ -421,6 +456,7 @@ void vm(unsigned stackSize){
         &&IGETKEY, &&IGETKEY_, &&SGETKEY, &&SGETKEY_, &&U_GETKEY, &&U_GETKEY_,
         &&IGETINDEX, &&IGETINDEX_, &&U_GETINDEX, &&U_GETINDEX_,
         &&TCHECKST, &&TCHECKCV,
+        &&NIL, &&U_NIL, &&D_NIL,
         &&CALL, &&RUN,
         &&STEPBACK,
         &&LEN,
@@ -513,6 +549,10 @@ void vm(unsigned stackSize){
         // TCHECK
         TCHECKST:{}
         TCHECKCV:{}
+        // NIL
+        NIL:{}
+        U_NIL:{}
+        D_NIL:{}
         // CALL, RUN
         CALL:{}
         RUN:{}
@@ -717,27 +757,148 @@ void useCommandlineArgs(int argc, char *argv[]){
 	cout << "\t\tFrom Commandline" << argc << endl;
 }
 
+
+/* TERMINAL (e.g. BASH) REPL COLORS */
+#if defined(__linux__) || defined(__CYGWIN__)
+#define RST  "\x1B[0m"
+#define KRED  "\x1B[31m"
+#define KGRN  "\x1B[32m"
+#define KYEL  "\x1B[33m"
+#define KBLU  "\x1B[34m"
+#define KMAG  "\x1B[35m"
+#define KCYN  "\x1B[36m"
+#define KWHT  "\x1B[37m"
+
+#define FRED(x) KRED x RST
+#define FGRN(x) KGRN x RST
+#define FYEL(x) KYEL x RST
+#define FBLU(x) KBLU x RST
+#define FMAG(x) KMAG x RST
+#define FCYN(x) KCYN x RST
+#define FWHT(x) KWHT x RST
+
+#define BOLD(x) "\x1B[1m" x RST
+#define UNDL(x) "\x1B[4m" x RST
+/* CMD REPL COLORS */
+#elif defined(_WIN32)
+HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+#define WRED 12 // correct
+#define WGRN 10
+#define WYEL 14
+#define WBLU 9
+#define WMAG 13
+#define WCYN 11
+#define WWHT 15
+#endif // defined
+
 string trim(const string &str);
 void useConsoleArgs(){
+    #if defined(__linux__) || defined(__CYGWIN__)
 	cout
-		<< "\t\tFrom Console"
-		<< "\nAstro 0.1 by Nypro"
-		<< "\n[GCC 4.9.1] (Android) | [GCC 4.9.2] (Windows)"
+		<<"\t\tFrom Console[UNIX]"
+		<<"\n"
+		<<"\n  ___ __  ______  _      __ ____  ______ "
+		<<"\n /  "<<BOLD(FMAG("_"))<<"'  |/  "<<BOLD(FMAG("____"))<<"|/ |____|  / "<<BOLD(FMAG("___"))<<"|/  "<<BOLD(FMAG("_"))<<"   |"; cout/////
+		<<"\n|  / |  |"<<BOLD(FMAG("___"))<<" \\__'   "<<BOLD(FMAG("___"))<<"/|   /   |  | |  |"; cout/////
+		<<"\n|  \\_|  |___\\_  |  |____|  |    |  |_|  |"
+		<<"\n \\"<<BOLD(FMAG("___"))<<"'"<<BOLD(FMAG("__"))<<"|"<<BOLD(FMAG("_______"))<<"/\\"<<BOLD(FMAG("______"))<<"|"<<BOLD(FMAG("__"))<<"|    |"<<BOLD(FMAG("_______"))<<"/"
+		<<"\n                             "<<BOLD(FYEL("0.1 "))<<BOLD(FYEL("by Nypro"))
+		<<endl;
+    #elif defined(_WIN32)
+	cout
+		<<"\t  From Console [WINDOWS]"
+		<<"\n"
+		<<"\n  ___ __  ______  _      __ ____  ______ "
+		<<"\n /  "; SetConsoleTextAttribute(hConsole, WMAG);
+		cout << "_"; SetConsoleTextAttribute(hConsole, WWHT);
+		cout << "'  |/  "; SetConsoleTextAttribute(hConsole, WMAG);
+		cout << "____"; SetConsoleTextAttribute(hConsole, WWHT);
+		cout << "|/ |____|  / "; SetConsoleTextAttribute(hConsole, WMAG);
+		cout << "___"; SetConsoleTextAttribute(hConsole, WWHT);
+		cout << "|/  "; SetConsoleTextAttribute(hConsole, WMAG);
+		cout << "_"; SetConsoleTextAttribute(hConsole, WWHT);
+		cout << "   |"; ////
+		cout <<"\n|  / |  |"; SetConsoleTextAttribute(hConsole, WMAG);
+		cout << "___"; SetConsoleTextAttribute(hConsole, WWHT);
+		cout << " \\__'   "; SetConsoleTextAttribute(hConsole, WMAG);
+		cout << "___"; SetConsoleTextAttribute(hConsole, WWHT);
+		cout << "/|   /   |  | |  |"; ////
+		cout <<"\n|  \\_|  |___\\_  |  |____|  |    |  |_|  |"
+		<<"\n \\"; SetConsoleTextAttribute(hConsole, WMAG);
+		cout << "___"; SetConsoleTextAttribute(hConsole, WWHT);
+		cout << "'"; SetConsoleTextAttribute(hConsole, WMAG);
+		cout << "__"; SetConsoleTextAttribute(hConsole, WWHT);
+		cout << "|"; SetConsoleTextAttribute(hConsole, WMAG);
+		cout << "_______"; SetConsoleTextAttribute(hConsole, WWHT);
+		cout << "/\\"; SetConsoleTextAttribute(hConsole, WMAG);
+		cout << "______"; SetConsoleTextAttribute(hConsole, WWHT);
+		cout << "|"; SetConsoleTextAttribute(hConsole, WMAG);
+		cout << "__"; SetConsoleTextAttribute(hConsole, WWHT);
+		cout << "|    |"; SetConsoleTextAttribute(hConsole, WMAG);
+		cout << "_______"; SetConsoleTextAttribute(hConsole, WWHT);
+		cout << "/"
+		<<"\n                             "; SetConsoleTextAttribute(hConsole, WYEL);
+		cout << "0.1 by Nypro"
+		<<endl;
+		SetConsoleTextAttribute(hConsole, WWHT);
+    #endif
+	//  MOCK
+	#if defined(__linux__) || defined(__CYGWIN__)
+	cout
+		//<< "MOCK"
+		<< BOLD(FYEL("\n::: ")) <<"func add(a, b): a + b"
+		<< "\n> add function {0 overloads}"
+		<< BOLD(FYEL("\n\n::: ")) <<"add(2, 3)"
+		<< "\n> 5"
+		//<< "\nMOCK"
 		<< endl;
+	#elif defined(_WIN32)
+	SetConsoleTextAttribute(hConsole, WYEL);
+	cout
+		//<< "MOCK"
+		<< "\n::: "; SetConsoleTextAttribute(hConsole, WWHT);
+	cout
+		<< "func add(a, b): a + b "
+		<<  "\n> add function {0 overloads}"; SetConsoleTextAttribute(hConsole, WYEL);
+	cout
+		<< "\n\n::: "; SetConsoleTextAttribute(hConsole, WWHT);
+	cout
+		<<"add(2, 3)"
+		<< "\n> 5"
+		//<< "\nMOCK"
+		<< endl;
+	#endif
 	bool more = true;
 	string input = "";
 	while(more){
-		cout << "::: ";
+		#if defined(__linux__) || defined(__CYGWIN__)
+		cout << BOLD(FYEL("\n::: "));
+		#elif defined(_WIN32)
+		SetConsoleTextAttribute(hConsole, WYEL);
+		cout << "\n::: ";
+		SetConsoleTextAttribute(hConsole, WWHT);
+		#endif
 		std::getline(cin, input);
 		/*
 		*/
 		if(trim(input) == "exit") more = false;
 		else{
-			cout << input;
+			cout << "> " << input;
 			cout << endl;
 			more = true;
 		}
 	}
+}
+
+void sizes(){
+	cout
+		<< "sizeof(Instr):\t\t" << sizeof(Instr) << " bytes"
+		<< "\nsizeof(StackObj):\t" << sizeof(StackObj) << " bytes"
+		<< "\nsizeof(Any):\t\t" << sizeof(Any) << " bytes"
+		<< "\nsizeof(Type):\t\t" << sizeof(Type) << " bytes"
+		<< "\nsizeof(Func):\t\t" << sizeof(Func) << " bytes"
+		<< "\nsizeof(ComplexObj):\t" << sizeof(ComplexObj) << " bytes"
+		<< endl;
 }
 
 // UTILITIES //
@@ -746,3 +907,73 @@ inline string trim(const string &str){
 	auto wsback = find_if_not(str.rbegin(), str.rend(), [](int c){ return isspace(c); }).base();
 	return (wsback <= wsfront ? string() : string(wsfront,wsback));
 }
+
+
+// 14/11/16
+//"; SetConsoleTextAttribute(hConsole, k); cout << "
+// Getting CMD Colors
+/*for(int k = 1; k < 255; k++){
+    // pick the colorattribute k you want
+    SetConsoleTextAttribute(hConsole, k);
+    cout << k << " I want to be nice today!" << endl;
+}*/
+
+/*	cout
+		<<"\tFrom Console [LINUX]"
+		<<"\n"
+		<<"\n  ___ __  ______  _      __ ____  ______ "
+		<<"\n /  "<<BOLD(FMAG("_"))<<"'  |/  "<<BOLD(FMAG("____"))<<"|/ |____|  / "<<BOLD(FMAG("___"))<<"|/  "<<BOLD(FMAG("_"))<<"   |"; cout/////
+		<<"\n|  / |  |"<<BOLD(FMAG("___"))<<" \\__'   "<<BOLD(FMAG("___"))<<"/|   /   |  | |  |"; cout/////
+		<<"\n|  \\_|  |___\\_  |  |____|  |    |  |_|  |"
+		<<"\n \\"<<BOLD(FMAG("___"))<<"'"<<BOLD(FMAG("__"))<<"|"<<BOLD(FMAG("_______"))<<"/\\"<<BOLD(FMAG("______"))<<"|"<<BOLD(FMAG("__"))<<"|    |"<<BOLD(FMAG("_______"))<<"/"
+		<<"\n                             "<<BOLD(FYEL("0.1 "))<<BOLD(FYEL("by Nypro"))
+//		<<"\n"
+//		<<"\n\t[GCC 4.9.1] (Android)"
+//		<<"\n\t[GCC 4.9.2] (Windows)"
+		<<endl;*/
+
+/*cout
+		<<"\tFrom Console [LINUX]"
+		<<"\n"
+		<<"\n  ___ __  ______  _      __ ____  ______ "
+		<<"\n /  _'  |/  ____|/ |____|  / ___|/  _   |"
+		<<"\n|  / |  |___ \\__'   ___/|   /   |  | |  |"
+		<<"\n|  \\_|  |___\\_  |  |____|  |    |  |_|  |"
+		<<"\n \\___'__|_______/\\______|__|    |_______/"
+		<<"\n                             0.1 by Nypro"
+		<<"\n"
+//		<<"\n\t[GCC 4.9.1] (Android)"
+//		<<"\n\t[GCC 4.9.2] (Windows)"
+		<<endl;*/
+
+
+// REPL DESIGN
+// 13/11/16
+/*
+	cout
+		<<"\tFrom Console [LINUX]"
+		<<"\n"
+		<<"\n  ___ __  ______  _      __ ____  ______ "
+		<<"\n /  _'  |/  ____|/ |____|  / ___|/  _   |"
+		<<"\n|  / |  |___ \__'   ___/|   /   |  | |  |"
+		<<"\n|  \_|  |___\_  |  |____|  |    |  |_|  |"
+		<<"\n \___'__|_______/\______|__|    |_______/"
+		<<"\n                             0.1 by Nypro"
+		<<"\n"
+		<<endl;
+*/
+/*cout
+		<< "\t\tFrom Console [LINUX]"
+		<< "\n        __         _________  ____________  ________     _______  "
+		<< "\n       /  \       /   ______||____    ____||   __   \   /  ___  \ "
+		<< "\n      /    \      |  /            |  |     |  |  \   | |  /   \  |"
+		<< "\n     /  /\  \     |  \_____       |  |     |  |   |  | |  |   |  |"
+		<< "\n    /  /__\  \    \______   \     |  |     |  |   |  | |  |   |  |"
+		<< "\n   /  ______  \          \  |     |  |     |  |__/  /  |  |   |  |"
+		<< "\n  /  /      \  \         |  |     |  |     |   ___  \  |  |   |  |"
+		<< "\n /  /        \  \  ______/  |     |  |     |  |   \  \ |  \___/  |"
+		<< "\n/__/          \__\|_________/     |__|     |__|    \__\ \_______/ "
+		<< "\n                                                   0.0.83 by Nypro"
+		<< "\n"
+		<< endl;
+*/
