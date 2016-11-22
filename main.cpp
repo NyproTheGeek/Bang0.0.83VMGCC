@@ -10,6 +10,9 @@
 #include <memory>
 #include <map>
 #include <fstream>
+#if defined(_WIN32)
+#include <windows.h>
+#endif // defined
 
 using std::cout;
 using std::endl;
@@ -30,8 +33,8 @@ using std::ifstream;
  * @bug None that I know of. :-)
  */
 
-/* TODOs
- * I might remove all refCount fields if I see that I can rely 
+/*!
+ * @todo might remove all refCount fields if I see that I can rely
  * on shared_ptr internal refCount.
  */
 
@@ -40,14 +43,13 @@ using std::ifstream;
 // PRIMITIVES
 /*!
  * This union contains all possible 'bare' primitive values
- * supported by Bang.
+ * supported by Astro.
  */
 union PrimitiveValue{
     bool bl;
     int64_t i64; uint64_t u64;
     double f64;
 };
-
 /*!
  * This struct represents a primitive value on the stack
  */
@@ -56,149 +58,76 @@ struct StackPrimitive{
     PrimitiveValue value;
 };
 
-/* REMOVE */
-/*!
- * This struct represents a function object.
- * Bang's functions are first class functions. They can be
- * passed around as variables.
- */
-struct FuncObj{
-    unsigned type;
-    unsigned func;
-};
+
+union IndiePtr;
+struct Buffer;
+struct ComplexPtr;
+union StackObj;
+struct Func;
+struct Type;
+
 
 /*!
- * This struct represents a datatype object.
- * Bang's datatypes are first class structures. They can be
- * passed around as variables.
+ * This union contains pointers to objects and bare primitives.
+ * Array objects are not included because they will be the ones
+ * to own this union.
  */
-struct TypeObj{
-    unsigned type;
-    unsigned dataType;
-};
-/* END REMOVE */
-
-union Any;
-struct AnyPtr;
-union HashOpt;
-union BufferOpt;
-struct StrObj;
-/*!
- * This struct holds a pointer to any structures contained
- * within Any.
- */
-struct AnyPtr{
-    unsigned type;
-    std::unique_ptr<Any> any;
+union IndiePtr{
+	std::unique_ptr<ComplexPtr> complex;
+	std::unique_ptr<bool> bl;
+	std::unique_ptr<int64_t> i64;
+	std::unique_ptr<uint64_t> u64;
+	std::unique_ptr<double> f64;
 };
 
-// COMPLEX OBJ
+struct ComplexPtr{
+	unsigned type;
+	std::shared_ptr<StackObj> obj;
+};
+
+
 /*!
  * This struct represents an object of a user-defined type.
  */
 struct ComplexObj{
-    unsigned type;
-    unsigned size;
-    unsigned refCount;
-    std::unique_ptr<AnyPtr> anyPtr; // An array of AnyPtrs
+    unsigned header;
+    std::shared_ptr<StackObj> body;
+    // type, size, refCount, fields...
 };
 
+
+union BufferOpt{
+	IndiePtr indiePtr; // A array of indie objects
+	std::unique_ptr<Buffer> buffer; // An array of Buffers
+};
 /*!
- * This struct represents an hash object.
- * Hash objects cannot be used directly, instead they are
- * contained within list objects or other nested hash objects.
- */
-struct HashObj{
-	unsigned type;
-	unsigned size;
-	std::unique_ptr<StrObj> strKey;
-	std::unique_ptr<HashOpt> content; // An Array of HashOpts
-};
-
-union HashOpt{
-	PrimitiveValue primVal;
-	ComplexObj complexObj;
-	HashObj hashObj;
-};
-
-/*!
- * This struct represents a list object.
- * Bang's list objects have dual function. They can be used to
- * as a dynamic array or hashmaps.
- */
-struct ListObj{
-	unsigned type;
-	unsigned refCount;
-	unsigned dimen; // dimen (e.g. 3D)
-	std::unique_ptr<unsigned> dimenSizes; // e.g. 2x4x3
-	std::unique_ptr<HashObj> hashObj; // An Array of HashObjs
-};
-
-
-/*!
- * This struct represents a buffer object.
- * Buffer objects can only be referenced once (iso), i.e. they
+ * This struct represents a buffer.
+ * Buffer can only be referenced once (iso), i.e. they
  * are meant to be owned by only one variable.
  * Buffers are plainly lists. They refer to contiguous blocks of
  * of memory and are sometimes preferred over list objects.
  * They are meant for low-level implementation in the language
  * and therefore should be used sparingly.
  */
-struct BufferObj{
+struct Buffer{
 	unsigned type;
-	unsigned dimen; // dimen (e.g. 3D)
-	std::unique_ptr<unsigned> dimenSizes; // e.g. 2x4x3
-	std::unique_ptr<BufferOpt> content;
-};
-
-union BufferOpt{
-	std::unique_ptr<Any> any; // An Array of Anys
-	std::unique_ptr<BufferObj> bufferObj; // An array of BufferObjs
-};
-
-
-/*!
- * This struct represents a tuple object.
- */
-struct TupleObj{
-	unsigned type;
-	unsigned refCount;
 	unsigned dimen; // dimen (e.g. 3D)
 	std::unique_ptr<unsigned> dimenSizes; // e.g. 2x4x3
 	BufferOpt content;
 };
 
-/*!
- * This struct represents a string object.
- * String supports UTF-8 encoding.
- * String is immutable, so content cannot be changed once
- * assigned.
- * If type field ascii bit flag is set, then the string content
- * can be interpreted byte by byte. This allows 0(N) access
- * codePointSize can be calculated and cached in order to reduce
- * repetitive calculation.
- */
-struct StrObj{
-	unsigned type; // + ascii_flag
-	unsigned size;
-	unsigned refCount;
-	unsigned codePointSize;
-	std::unique_ptr<uint8_t> content;
-};
 
 /*!
- * This struct represents a chars object.
- * Chars supports UTF-32 encoding.
- * Chars is mutable, so content can be changed. UTF-32 was chosen
- * for this reason, because it will allow 0(N) access to
- * characters.
+ * This struct represents an object that can fit on the stack.
  */
-struct CharsObj{
-	unsigned type;
-	unsigned size;
-	unsigned refCount;
-	std::unique_ptr<uint32_t> content;
+union StackObj{
+	StackPrimitive prim;
+	ComplexPtr complex;
+	Buffer buffer;
+	StackObj(){};
+	~StackObj(){};
 };
+
 
 // FUNCTION AND TYPE
 /*!
@@ -207,10 +136,10 @@ struct CharsObj{
  * variables, Funcs are the contents the function objects point
  * to.
  */
-struct Func{
-    unsigned type; // Func
-    unsigned format;
-    unsigned instructions;
+struct Func{ // NEEDS REWORK
+	unsigned overloadTop;
+	unsigned format;
+	unsigned instructions;
 };
 
 
@@ -220,29 +149,13 @@ struct Func{
  * variables, Types are the contents the type objects point
  * to.
  */
-struct Type{
-    unsigned type; // = DataType
-    std::unique_ptr<unsigned> parentTypes; // all of them
-    std::unique_ptr<Any> mockObject;
-    std::unique_ptr<unsigned> constructors;
-    unsigned normalDestructor;
-    unsigned exceptionDestructor;
-    std::unique_ptr<unsigned> parentTypesSize;
-    std::unique_ptr<unsigned> constructorsSize;
-};
-
-// ANY
-/*!
- * This union contains all structures defined under Any.
- */
-union Any{
-    BufferObj bufferObj; ListObj listObj; TupleObj tupleObj;
-    StrObj strObj; CharsObj charsObj; 
-    ComplexObj complexObj; 
-    Func func; Type type;
-    StackPrimitive stackPrim;
-    Any(){};
-    ~Any(){};
+struct Type{ // NEEDS REWORK
+	unsigned ancestorSize;
+	std::unique_ptr<uint16_t> ancestors; // ancestors is sorted.
+	unsigned constructorsSize;
+	std::unique_ptr<unsigned> constructors;
+	unsigned normalDestructor;
+	unsigned exceptionDestructor;
 };
 
 
@@ -254,26 +167,23 @@ union Any{
 struct NoAddyInstr{
 	int8_t opcode;
 };
-
 /*!
  * This struct represents an opcode with only one address.
- * Examples: INCR A; MKLIST A; RET A
+ * Examples: INCR A; MKBUF A; RET A
  */
 struct OneAddyInstr{
 	int8_t opcode;
 	int8_t addy1;
 };
-
 /*!
  * This struct represents an opcode with two addresses.
- * Examples: STEP A B; CATCH A B; MOV_R A B
+ * Examples: STEP A B; CATCH A B
  */
 struct TwoAddyInstr{
 	int8_t opcode;
 	int8_t addy1;
 	int8_t addy2;
 };
-
 /*!
  * This struct represents an opcode with three addresses.
  * Examples: ADD A B C; EQ A B C; SHL A B C
@@ -284,24 +194,20 @@ struct ThreeAddyInstr{
 	int8_t addy2;
 	int8_t addy3;
 };
-
 /*!
- * This union contains all types of opcodes and attribute.
+ * This union contains all types of opcodes.
  */
 union Instr{
-	NoAddyInstr addy0;
-	OneAddyInstr addy1;
-	TwoAddyInstr addy2;
-	ThreeAddyInstr addy3;
-	uint32_t attribute;
+	NoAddyInstr addy0Instr;
+	OneAddyInstr addy1Instr;
+	TwoAddyInstr addy2Instr;
+	ThreeAddyInstr addy3Instr;
 };
 
-// LISTS
-std::unique_ptr<Func> funcList;
-std::unique_ptr<Type> typeList;
-std::unique_ptr<Any> formatList;
-std::unique_ptr<Any> globalList;
 
+
+
+void sizes();
 void vm(unsigned stackSize);
 void useCommandlineArgs(int argc, char *argv[]);
 void useConsoleArgs();
@@ -312,29 +218,48 @@ int main(int argc, char *argv[]){
 	std::chrono::time_point<std::chrono::system_clock> start, end;
 	start = std::chrono::system_clock::now();
 	//-----------------------BEGIN----------------------------------
+	/*SIZES*/
+	sizes();
+	/*SIZES*/
 	if(argc > 1) useCommandlineArgs(argc, argv);
 	else useConsoleArgs();
 	vm(1000);
-    //------------------------END-----------------------------------
-    end = std::chrono::system_clock::now();
+	//------------------------END-----------------------------------
+	end = std::chrono::system_clock::now();
 	std::chrono::duration<double> elapsed = end - start;
-	cout << "Time taken: " << elapsed.count() << "s" << endl;
+	cout << "> execution time: " << elapsed.count() << "s" << endl;
 
 	return 0;
 }
 
+
+
 // VM
 void vm(unsigned stackSize){
 
-    /*!
+	/*!
      * If you don't understand how the jump tables work.
      * Please do not edit them.
      * If you do, I will hunt you down.
      * Consider that a promise.
      */
 
-    // STACK
-    
+	
+	// LISTS
+	StackObj stack [stackSize];
+	std::unique_ptr<unsigned> stackHeadList;
+	
+	std::unique_ptr<Func> funcList;
+	std::unique_ptr<StackObj> layoutList;
+	
+	std::unique_ptr<Type> typeList;
+	
+	std::unique_ptr<StackObj> globalList;
+	
+	std::unique_ptr<Instr> instructionList;
+	
+	std::unique_ptr<uint64_t> attributeList;
+
 
     // JUMP TABLES
     void *primitiveOpTable[] = {
@@ -354,8 +279,6 @@ void vm(unsigned stackSize){
         &&I64_MOD, &&U64_MOD, &&F64_MOD,
         // EXP
         &&I64_EXP, &&U64_EXP, &&F64_EXP,
-        // CONCAT
-        &&STR_CONCAT, &&CHARS_CONCAT,
         // INCR
         &&BL_INCR, &&I64_INCR, &&U64_INCR, &&F64_INCR,
         // DECR
@@ -397,36 +320,44 @@ void vm(unsigned stackSize){
         // LEN
         &&LIST_LEN, &&BUFFER_LEN, &&STR_LEN, &&CHARS_LEN, &&TUPLE_LEN, &&COMPLEX_LEN,
         // CAST
-        &&UINT_TO_INT, &&UINT_TO_FLOAT, &&UINT_TO_STR, &&UINT_TO_CHARS,
-        &&INT_TO_UINT, &&INT_TO_FLOAT, &&INT_TO_STR, &&INT_TO_CHARS,
-        &&FLOAT_TO_INT, &&FLOAT_TO_UINT, &&FLOAT_TO_STR, &&FLOAT_TO_CHARS,
-        &&STR_TO_INT, &&STR_TO_UINT, &&STR_TO_FLOAT, &&STR_TO_CHARS,
-        &&CHARS_TO_INT, &&CHARS_TO_UINT, &&CHARS_TO_FLOAT, &&CHARS_TO_STR,
+        &&UINT_TO_INT, &&UINT_TO_FLOAT,
+        &&INT_TO_UINT, &&INT_TO_FLOAT,
+        &&FLOAT_TO_INT, &&FLOAT_TO_UINT,
     };
 
 
 
     void *instructionTable[] = {
-        &&MOV_V, &&MOV_R, &&MOV_WR, &&P_MOV_V, &&P_MOV_R, &&P_MOV_WR, &&U_MOV_V, &&U_MOV_R, &&U_MOV_WR,
+        &&MOV_V, &&MOV_R, &&MOV_WR,
         &&ADD, &&SUB, &&MUL, &&DIV, &&MOD, &&EXP, &&ROOT, &&UNM,
-        &&CONCAT,
         &&INCR, &&DECR, &&STEP,
         &&CAST,
-        &&EQ, &&NEQ, &&LT, &&LE, &&GT, &&GE, &&EQ__, &&NEQ__, &&LT__, &&LE__, &&GT__, &&GE__,
+        &&EQ, &&LT, &&LE, &&EQ__, &&LT__, &&LE__,
         &&AND, &&OR,
         &&BNOT, &&BOR, &&BAND, &&BXOR,
         &&SHL, &&SHR,
-        &&MKLIST, &&MKBUFFER, &&MKSTR, &&MKCHARS, &&MKTUPLE, &&MKTYPE,
-        &&SETLIST, &&SETBUFFER, &&SETSTR, &&SETCHARS, &&SETTUPLE, &&SETCOMPLEX,
-        &&IGETKEY, &&IGETKEY_, &&SGETKEY, &&SGETKEY_, &&U_GETKEY, &&U_GETKEY_,
-        &&IGETINDEX, &&IGETINDEX_, &&U_GETINDEX, &&U_GETINDEX_,
-        &&TCHECKST, &&TCHECKCV,
-        &&CALL, &&RUN,
+        &&MKBUF, &&MKCMP,
+        &&STAGEGLOBAL_,
+        // last index is checked to determine if pulling/pushing barePrimitive
+        &&PULLBUF_, &&PUSHBUF_,
+        &&PULLINDEX, &&PUSHINDEX, // indexer
+        &&PULLNEXT, // generator
+        &&PULLCMP_V_, &&PULLCMP_R_, &&PULLCMP_WR_,
+        // type is checked to determine if pulling/pushing stackPrimitive
+        // no null checks when you are pulling a value or ref, 0only when you are pushing it.
+        &&PUSHCMP_V_, &&PUSHCMP_R_, &&PUSHCMP_WR_,
+        &&PUSHCMP_VNULL_, &&PUSHCMP_RNULL_, &&PUSHCMP_WRNULL_,
+        &&INDEX, &&INDEX_,
+        &&TYPECHECK, &&TYPECHECKSUB,
+        &&SWITCH,
+        &&CALL, &&RUN, &&EMIT, &&EMITTOP,
         &&STEPBACK,
-        &&LEN,
+        &&LENCMP, &&LENBUF,
+        &&DIMEN, &&DIMENSIZE,
         &&CATCH, &&THROW,
         &&JMP, &&JMPBACK,
         &&RET, &&RET__,
+        &&CLEAR,
         &&PRINT, &&PRINTLN, &&SCAN,
         &&OPENF, &&READF, &&WRITEF, &&CLOSEF,
         &&EXIT,
@@ -434,17 +365,11 @@ void vm(unsigned stackSize){
 
     // INSTRUCTION JUMP ACTIONS // 85 instructions
     {
-    	// MOV
-    	MOV_V:{}
-    	MOV_R:{}
-    	MOV_WR:{}
-    	P_MOV_V:{}
-    	P_MOV_R:{}
-    	P_MOV_WR:{}
-    	U_MOV_V:{}
-    	U_MOV_R:{}
-    	U_MOV_WR:{}
-    	// ADD, SUB, MUL, DIV, MOD, EXP, ROOT, UNM
+        // MOV
+        MOV_V:{}
+        MOV_R:{}
+        MOV_WR:{}
+        // ADD, SUB, MUL, DIV, MOD, EXP, ROOT, UNM
         ADD:{}
         SUB:{}
         MUL:{}
@@ -453,8 +378,6 @@ void vm(unsigned stackSize){
         EXP:{}
         ROOT:{}
         UNM:{}
-        // CONCAT
-        CONCAT:{}
         // INCR, DECR, STEP
         INCR:{}
         DECR:{}
@@ -463,17 +386,11 @@ void vm(unsigned stackSize){
         CAST:{}
         // EQ, NEQ, LT, LE, GT, GE
         EQ:{}
-        NEQ:{}
         LT:{}
         LE:{}
-        GT:{}
-        GE:{}
         EQ__:{}
-        NEQ__:{}
         LT__:{}
         LE__:{}
-        GT__:{}
-        GE__:{}
         // AND OR
         AND:{}
         OR:{}
@@ -486,39 +403,46 @@ void vm(unsigned stackSize){
         SHL:{}
         SHR:{}
         // MK
-        MKLIST:{}
-        MKBUFFER:{}
-        MKSTR:{}
-        MKCHARS:{}
-        MKTUPLE:{}
-        MKTYPE:{}
-        // SET
-        SETLIST:{}
-        SETBUFFER:{}
-        SETSTR:{}
-        SETCHARS:{}
-        SETTUPLE:{}
-        SETCOMPLEX:{}
-        // KEYS, INDICES
-        IGETKEY:{}
-        IGETKEY_:{}
-        SGETKEY:{}
-        SGETKEY_:{}
-        U_GETKEY:{}
-        U_GETKEY_:{}
-        IGETINDEX:{}
-        IGETINDEX_:{}
-        U_GETINDEX:{}
-        U_GETINDEX_:{}
-        // TCHECK
-        TCHECKST:{}
-        TCHECKCV:{}
-        // CALL, RUN
+        MKBUF:{}
+        MKCMP:{}
+        // STAGEGLOBAL
+        STAGEGLOBAL_:{}
+        // PULL, PUSH
+        PULLBUF_:{}
+        PUSHBUF_:{}
+        PULLINDEX:{}
+        PUSHINDEX:{}
+        PULLNEXT:{}
+        PULLCMP_V_:{}
+        PULLCMP_R_:{}
+        PULLCMP_WR_:{}
+        PUSHCMP_V_:{}
+        PUSHCMP_R_:{}
+        PUSHCMP_WR_:{}
+        PUSHCMP_VNULL_:{}
+        PUSHCMP_RNULL_:{}
+        PUSHCMP_WRNULL_:{}
+        // INDEX
+        INDEX:{}
+        INDEX_:{}
+        // TYPECHECK
+        TYPECHECK:{}
+        TYPECHECKSUB:{}
+        // SWITCH
+        SWITCH:{}
+        //  CALL, EMIT
         CALL:{}
         RUN:{}
+        EMIT:{}
+        EMITTOP:{}
         // STEPBACK
         STEPBACK:{}
-        LEN:{}
+        // LEN
+        LENCMP:{}
+        LENBUF:{}
+        // DIMEN
+        DIMEN:{}
+        DIMENSIZE:{}
         // CATCH, THROW
         CATCH:{}
         THROW:{}
@@ -528,6 +452,8 @@ void vm(unsigned stackSize){
         // RET
         RET:{}
         RET__:{}
+        // CLEAR
+        CLEAR:{}
         // PRINT, SCAN
         PRINT:{}
         PRINTLN:{}
@@ -578,9 +504,6 @@ void vm(unsigned stackSize){
         I64_EXP:{}
         U64_EXP:{}
         F64_EXP:{}
-        // CONCAT
-        STR_CONCAT:{}
-        CHARS_CONCAT:{}
         // INCR
         BL_INCR:{}
         I64_INCR:{}
@@ -690,54 +613,173 @@ void vm(unsigned stackSize){
         // CAST
         UINT_TO_INT:{}
         UINT_TO_FLOAT:{}
-        UINT_TO_STR:{}
-        UINT_TO_CHARS:{}
         INT_TO_UINT:{}
         INT_TO_FLOAT:{}
-        INT_TO_STR:{}
-        INT_TO_CHARS:{}
         FLOAT_TO_INT:{}
         FLOAT_TO_UINT:{}
-        FLOAT_TO_STR:{}
-        FLOAT_TO_CHARS:{}
-        STR_TO_INT:{}
-        STR_TO_UINT:{}
-        STR_TO_FLOAT:{}
-        STR_TO_CHARS:{}
-        CHARS_TO_INT:{}
-        CHARS_TO_UINT:{}
-        CHARS_TO_FLOAT:{}
-        CHARS_TO_STR:{}
     }
 
 }
+
+// SETUP
+void readCompiled(const string &astc){
+}
+
 
 // COMMANDLINE, CONSOLE
 void useCommandlineArgs(int argc, char *argv[]){
 	cout << "\t\tFrom Commandline" << argc << endl;
 }
 
+
+/* TERMINAL (e.g. BASH) REPL COLORS */
+#if defined(__linux__) || defined(__CYGWIN__)
+#define RST  "\x1B[0m"
+#define KRED  "\x1B[31m"
+#define KGRN  "\x1B[32m"
+#define KYEL  "\x1B[33m"
+#define KBLU  "\x1B[34m"
+#define KMAG  "\x1B[35m"
+#define KCYN  "\x1B[36m"
+#define KWHT  "\x1B[37m"
+
+#define FRED(x) KRED x RST
+#define FGRN(x) KGRN x RST
+#define FYEL(x) KYEL x RST
+#define FBLU(x) KBLU x RST
+#define FMAG(x) KMAG x RST
+#define FCYN(x) KCYN x RST
+#define FWHT(x) KWHT x RST
+
+#define BOLD(x) "\x1B[1m" x RST
+#define UNDL(x) "\x1B[4m" x RST
+/* CMD REPL COLORS */
+#elif defined(_WIN32)
+HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+#define WRED 12 // correct
+#define WGRN 10
+#define WYEL 14
+#define WBLU 9
+#define WMAG 13
+#define WCYN 11
+#define WWHT 15
+#endif // defined
+
 string trim(const string &str);
 void useConsoleArgs(){
+    #if defined(__linux__) || defined(__CYGWIN__)
 	cout
-		<< "\t\tFrom Console"
-		<< "\nAstro 0.1 by Nypro"
-		<< "\n[GCC 4.9.1] (Android) | [GCC 4.9.2] (Windows)"
+		<<"\t\tFrom Console[UNIX]"
+		<<"\n"
+		<<"\n  ___ __  ______  _      __ ____  ______ "
+		<<"\n /  "<<BOLD(FMAG("_"))<<"'  |/  "<<BOLD(FMAG("____"))<<"|/ |____|  / "<<BOLD(FMAG("___"))<<"|/  "<<BOLD(FMAG("_"))<<"   |"; cout/////
+		<<"\n|  / |  |"<<BOLD(FMAG("___"))<<" \\__'   "<<BOLD(FMAG("___"))<<"/|   /   |  | |  |"; cout/////
+		<<"\n|  \\_|  |___\\_  |  |____|  |    |  |_|  |"
+		<<"\n \\"<<BOLD(FMAG("___"))<<"'"<<BOLD(FMAG("__"))<<"|"<<BOLD(FMAG("_______"))<<"/\\"<<BOLD(FMAG("______"))<<"|"<<BOLD(FMAG("__"))<<"|    |"<<BOLD(FMAG("_______"))<<"/"
+		<<"\n                             "<<BOLD(FYEL("0.1 "))<<BOLD(FYEL("by Nypro"))
+		<<endl;
+    #elif defined(_WIN32)
+	cout
+		<<"\t  From Console [WINDOWS]"
+		<<"\n"
+		<<"\n  ___ __  ______  _      __ ____  ______ "
+		<<"\n /  "; SetConsoleTextAttribute(hConsole, WMAG);
+		cout << "_"; SetConsoleTextAttribute(hConsole, WWHT);
+		cout << "'  |/  "; SetConsoleTextAttribute(hConsole, WMAG);
+		cout << "____"; SetConsoleTextAttribute(hConsole, WWHT);
+		cout << "|/ |____|  / "; SetConsoleTextAttribute(hConsole, WMAG);
+		cout << "___"; SetConsoleTextAttribute(hConsole, WWHT);
+		cout << "|/  "; SetConsoleTextAttribute(hConsole, WMAG);
+		cout << "_"; SetConsoleTextAttribute(hConsole, WWHT);
+		cout << "   |"; ////
+		cout <<"\n|  / |  |"; SetConsoleTextAttribute(hConsole, WMAG);
+		cout << "___"; SetConsoleTextAttribute(hConsole, WWHT);
+		cout << " \\__'   "; SetConsoleTextAttribute(hConsole, WMAG);
+		cout << "___"; SetConsoleTextAttribute(hConsole, WWHT);
+		cout << "/|   /   |  | |  |"; ////
+		cout <<"\n|  \\_|  |___\\_  |  |____|  |    |  |_|  |"
+		<<"\n \\"; SetConsoleTextAttribute(hConsole, WMAG);
+		cout << "___"; SetConsoleTextAttribute(hConsole, WWHT);
+		cout << "'"; SetConsoleTextAttribute(hConsole, WMAG);
+		cout << "__"; SetConsoleTextAttribute(hConsole, WWHT);
+		cout << "|"; SetConsoleTextAttribute(hConsole, WMAG);
+		cout << "_______"; SetConsoleTextAttribute(hConsole, WWHT);
+		cout << "/\\"; SetConsoleTextAttribute(hConsole, WMAG);
+		cout << "______"; SetConsoleTextAttribute(hConsole, WWHT);
+		cout << "|"; SetConsoleTextAttribute(hConsole, WMAG);
+		cout << "__"; SetConsoleTextAttribute(hConsole, WWHT);
+		cout << "|    |"; SetConsoleTextAttribute(hConsole, WMAG);
+		cout << "_______"; SetConsoleTextAttribute(hConsole, WWHT);
+		cout << "/"
+		<<"\n                             "; SetConsoleTextAttribute(hConsole, WYEL);
+		cout << "0.1 by Nypro"
+		<<endl;
+		SetConsoleTextAttribute(hConsole, WWHT);
+    #endif
+	//  MOCK
+	#if defined(__linux__) || defined(__CYGWIN__)
+	cout
+		//<< "MOCK"
+		<< BOLD(FYEL("\n::: ")) <<"func add(a, b): a + b"
+		<< "\n> add function {0 overloads}"
+		<< BOLD(FYEL("\n\n::: ")) <<"add(2, 3)"
+		<< "\n> 5"
+		//<< "\nMOCK"
 		<< endl;
+	#elif defined(_WIN32)
+	SetConsoleTextAttribute(hConsole, WYEL);
+	cout
+		//<< "MOCK"
+		<< "\n::: "; SetConsoleTextAttribute(hConsole, WWHT);
+	cout
+		<< "func add(a, b): a + b "
+		<<  "\n> add function {0 overloads}"; SetConsoleTextAttribute(hConsole, WYEL);
+	cout
+		<< "\n\n::: "; SetConsoleTextAttribute(hConsole, WWHT);
+	cout
+		<<"add(2, 3)"
+		<< "\n> 5"
+		//<< "\nMOCK"
+		<< endl;
+	#endif
 	bool more = true;
 	string input = "";
 	while(more){
-		cout << "::: ";
+		#if defined(__linux__) || defined(__CYGWIN__)
+		cout << BOLD(FYEL("\n::: "));
+		#elif defined(_WIN32)
+		SetConsoleTextAttribute(hConsole, WYEL);
+		cout << "\n::: ";
+		SetConsoleTextAttribute(hConsole, WWHT);
+		#endif
 		std::getline(cin, input);
 		/*
 		*/
-		if(trim(input) == "exit") more = false;
+		if(trim(input) == "exit"|trim(input) == "^D") more = false;
 		else{
-			cout << input;
+			cout << "> " << input;
 			cout << endl;
 			more = true;
 		}
 	}
+}
+
+void sizes(){
+	cout
+		<< "sizeof(uint8_t):\t" << sizeof(uint8_t) << " bytes"
+		<< "\nsizeof(uint16_t):\t" << sizeof(uint16_t) << " bytes"
+		<< "\nsizeof(uint32_t):\t" << sizeof(uint32_t) << " bytes"
+		<< "\nsizeof(uint64_t):\t" << sizeof(uint64_t) << " bytes"
+		<< "\nsizeof(int):\t\t" << sizeof(int) << " bytes"
+		<< "\nsizeof(Instr):\t\t" << sizeof(Instr) << " bytes"
+		<< "\nsizeof(StackObj):\t" << sizeof(StackObj) << " bytes"
+		<< "\nsizeof(StackPrimitive):\t" << sizeof(StackPrimitive) << " bytes"
+		<< "\nsizeof(IndiePtr):\t" << sizeof(IndiePtr) << " bytes"
+		<< "\nsizeof(ComplexPtr):\t" << sizeof(ComplexPtr) << " bytes"
+		<< "\nsizeof(Buffer):\t\t" << sizeof(Buffer) << " bytes"
+		<< "\nsizeof(Type):\t\t" << sizeof(Type) << " bytes"
+		<< "\nsizeof(Func):\t\t" << sizeof(Func) << " bytes"
+		<< endl;
 }
 
 // UTILITIES //
